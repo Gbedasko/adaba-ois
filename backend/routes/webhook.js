@@ -3,6 +3,7 @@ const router  = express.Router();
 const db      = require('../db');
 const { detectIntent } = require('../services/intentRouter');
 const { extract }      = require('../services/extractor');
+const WHATSAPP_TOKEN = process.env.ACCESS_TOKEN;
 
 router.get('/', (req, res) => {
   const mode      = req.query['hub.mode'];
@@ -13,6 +14,7 @@ router.get('/', (req, res) => {
   }
   res.sendStatus(403);
 });
+const WHATSAPP_TOKEN = process.env.ACCESS_TOKEN;
 
 router.post('/', async (req, res) => {
   res.sendStatus(200);
