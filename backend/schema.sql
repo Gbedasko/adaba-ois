@@ -8,17 +8,22 @@ CREATE TABLE IF NOT EXISTS raw_messages (
 );
 
 CREATE TABLE IF NOT EXISTS orders (
-  id             SERIAL PRIMARY KEY,
-  customer_name  TEXT,
-  customer_phone TEXT,
-  product        TEXT,
-  quantity       INT,
-  selling_price  NUMERIC(12,2),
-  state          TEXT,
-  csr_name       TEXT,
-  order_status   TEXT DEFAULT 'PENDING',
-  raw_message_id INT REFERENCES raw_messages(id),
-  created_at     TIMESTAMPTZ DEFAULT NOW()
+  id                      SERIAL PRIMARY KEY,
+  customer_name           TEXT,
+  customer_phone          TEXT,
+  customer_phone2         TEXT,
+  product                 TEXT,
+  quantity                INT,
+  selling_price           NUMERIC(12,2),
+  state                   TEXT,
+  csr_name                TEXT,
+  order_status            TEXT DEFAULT 'PENDING',
+  delivery_address        TEXT,
+  logistics_partner       TEXT,
+  delivered_at            TIMESTAMPTZ,
+  response_time_minutes   INTEGER,
+  raw_message_id          INT REFERENCES raw_messages(id),
+  created_at              TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS remittances (
@@ -43,14 +48,14 @@ CREATE TABLE IF NOT EXISTS delivery_events (
 );
 
 CREATE TABLE IF NOT EXISTS unknown_messages (
-  id            SERIAL PRIMARY KEY,
+  id             SERIAL PRIMARY KEY,
   raw_message_id INT REFERENCES raw_messages(id),
-  body          TEXT NOT NULL,
-  sender_name   TEXT,
-  group_name    TEXT,
-  reason        TEXT,
-  status        TEXT DEFAULT 'pending',
-  created_at    TIMESTAMPTZ DEFAULT NOW()
+  body           TEXT NOT NULL,
+  sender_name    TEXT,
+  group_name     TEXT,
+  reason         TEXT,
+  status         TEXT DEFAULT 'pending',
+  created_at     TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS training_rules (
@@ -67,12 +72,45 @@ CREATE TABLE IF NOT EXISTS training_rules (
 );
 
 CREATE TABLE IF NOT EXISTS extraction_feedback (
-  id              SERIAL PRIMARY KEY,
-  raw_message_id  INT REFERENCES raw_messages(id),
-  original_output JSONB,
+  id               SERIAL PRIMARY KEY,
+  raw_message_id   INT REFERENCES raw_messages(id),
+  original_output  JSONB,
   corrected_output JSONB,
-  field_corrected TEXT,
-  correction_note TEXT,
-  added_by        TEXT DEFAULT 'admin',
-  created_at      TIMESTAMPTZ DEFAULT NOW()
+  field_corrected  TEXT,
+  correction_note  TEXT,
+  added_by         TEXT DEFAULT 'admin',
+  created_at       TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS receipts (
+  id               SERIAL PRIMARY KEY,
+  raw_message_id   INT REFERENCES raw_messages(id),
+  sender_name      TEXT,
+  group_name       TEXT,
+  amount           NUMERIC(14,2),
+  image_url        TEXT,
+  matched_order_id INT REFERENCES orders(id),
+  status           TEXT DEFAULT 'unmatched',
+  created_at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS issues (
+  id             SERIAL PRIMARY KEY,
+  raw_message_id INT REFERENCES raw_messages(id),
+  order_id       INT REFERENCES orders(id),
+  issue_type     TEXT,
+  severity       TEXT DEFAULT 'medium',
+  description    TEXT,
+  sender_name    TEXT,
+  group_name     TEXT,
+  status         TEXT DEFAULT 'open',
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Add missing columns to existing tables if upgrading
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_phone2       TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_address      TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS logistics_partner     TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_at          TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS response_time_minutes INTEGER;
+ALTER TABLE raw_messages ADD COLUMN IF NOT EXISTS group_name      TEXT;
