@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { fetchSummary, fetchOrders, fetchRemittances } from './api.js'
+import LearningInbox from './pages/LearningInbox.jsx'
 
 const fmt = (n) => '₦' + Number(n).toLocaleString('en-NG')
 const fmtDate = (d) => new Date(d).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })
@@ -139,7 +140,8 @@ export default function App() {
   const nav = [
     { id: 'dashboard',   label: '📊 Dashboard' },
     { id: 'orders',      label: '📦 Orders' },
-    { id: 'remittances', label: '💰 Remittances' },
+    { id: 'remittances', label: '💰 Remittances' },,
+    { id: 'learning',    label: '🧠 Learning' }
   ]
 
   return (
@@ -173,6 +175,7 @@ export default function App() {
         {page === 'dashboard'   && <DashboardPage   summary={summary}         loading={loading} />}
         {page === 'orders'      && <OrdersPage      orders={orders}           loading={loading} />}
         {page === 'remittances' && <RemittancesPage remittances={remittances} loading={loading} />}
+        {page === 'learning' && <LearningInbox />}
       </div>
     </div>
   )
