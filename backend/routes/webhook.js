@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db');
 const { detectIntent } = require('../services/intentRouter');
 const { extract } = require('../services/extractor');
+const { flagUnknownMessage } = require('../services/learningEngine');
 
 router.get('/', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -35,7 +36,12 @@ router.post('/', async (req, res) => {
     );
     const rawId = rawResult.rows[0].id;
 
-    if (intent === 'noise' || intent === 'unknown') return;
+    // Flag noise/unknown messages to the learning system
+    if (intent === 'noise') return;
+    if (intent === 'unknown') {
+      await flagUnknownMessage(rawId, body, senderName, groupName, 'Intent not recognised by router');
+      return;
+    }
 
     const data = await extract(intent, body, groupName, senderName, rawId);
     if (!data) return;
