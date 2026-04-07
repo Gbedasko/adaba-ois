@@ -27,7 +27,7 @@ router.post('/', async (req, res) => {
     const senderName = changes.contacts?.[0]?.profile?.name || msg.from;
     const groupName = changes.metadata?.display_phone_number || 'Unknown Group';
 
-    const intent = detectIntent(body);
+    const intent = await detectIntent(body);
 
     const rawResult = await db.query(
       `INSERT INTO raw_messages (group_name, sender_name, body, intent)
