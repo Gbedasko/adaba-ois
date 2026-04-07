@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const WHATSAPP_TOKEN = process.env.ACCESS_TOKEN;
 
 const SCHEMAS = {
   order: {
