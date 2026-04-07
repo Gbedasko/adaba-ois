@@ -36,6 +36,7 @@ app.use('/webhook', webhookRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/remittances', remittancesRoutes);
+app.use('/api/learning', require('./routes/learning'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Adaba OIS backend running on port ${PORT}`));
