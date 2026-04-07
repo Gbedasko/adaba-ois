@@ -41,3 +41,38 @@ CREATE TABLE IF NOT EXISTS delivery_events (
   raw_message_id    INT REFERENCES raw_messages(id),
   created_at        TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS unknown_messages (
+  id            SERIAL PRIMARY KEY,
+  raw_message_id INT REFERENCES raw_messages(id),
+  body          TEXT NOT NULL,
+  sender_name   TEXT,
+  group_name    TEXT,
+  reason        TEXT,
+  status        TEXT DEFAULT 'pending',
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS training_rules (
+  id            SERIAL PRIMARY KEY,
+  rule_type     TEXT NOT NULL,
+  pattern       TEXT NOT NULL,
+  meaning       TEXT NOT NULL,
+  intent        TEXT,
+  field         TEXT,
+  value         TEXT,
+  example_input TEXT,
+  added_by      TEXT DEFAULT 'admin',
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS extraction_feedback (
+  id              SERIAL PRIMARY KEY,
+  raw_message_id  INT REFERENCES raw_messages(id),
+  original_output JSONB,
+  corrected_output JSONB,
+  field_corrected TEXT,
+  correction_note TEXT,
+  added_by        TEXT DEFAULT 'admin',
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
