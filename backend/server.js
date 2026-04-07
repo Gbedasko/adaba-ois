@@ -41,3 +41,5 @@ app.use('/api/learning', require('./routes/learning'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Adaba OIS backend running on port ${PORT}`));
+
+// v2 - async intentRouter deployed
