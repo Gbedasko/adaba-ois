@@ -3,9 +3,9 @@ import threading
 import time
 import logging
 from flask import Flask, jsonify, request
-from database import init_db, get_connection
-from gmail_service import get_gmail_service, poll_gmail
-from telegram_service import send_report, build_report
+from database import init_db, get_connection, find_existing_order, insert_order, insert_duplicate, assign_csr
+from gmail_service import get_gmail_service, get_unread_lead_emails, mark_as_read
+from telegram_service import notify_csr, send_report, build_report, send_duplicate_alert
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -17,21 +17,54 @@ last_poll_time = None
 last_poll_status = "Not started yet"
 
 
+def process_lead_emails():
+    from datetime import datetime, timedelta
+    processed = 0
+    try:
+        service = get_gmail_service()
+        if not service:
+            return 0
+        emails = get_unread_lead_emails(service)
+        for email in emails:
+            try:
+                phone = email.get("customer_phone", "").strip()
+                name = email.get("customer_name", "").strip()
+                product = email.get("subject", "").strip()
+                ad_buyer = email.get("from_name", "").strip()
+                msg_id = email.get("message_id", "")
+                if not phone:
+                    mark_as_read(service, msg_id)
+                    continue
+                existing = find_existing_order(phone)
+                if existing:
+                    insert_duplicate(email, existing["id"])
+                    mark_as_read(service, msg_id)
+                    logger.info("Duplicate skipped for phone: %s", phone)
+                else:
+                    csr = assign_csr()
+                    if csr:
+                        order_id = insert_order(email, csr["id"])
+                        notify_csr(csr, email)
+                        logger.info("Order %s assigned to CSR %s", order_id, csr["name"])
+                    mark_as_read(service, msg_id)
+                    processed += 1
+            except Exception as e:
+                logger.error("Error processing email: %s", e, exc_info=True)
+    except Exception as e:
+        logger.error("Error in process_lead_emails: %s", e, exc_info=True)
+    return processed
+
+
 def background_poll():
     global last_poll_time, last_poll_status, polling_active
     interval = int(os.environ.get('POLL_INTERVAL_SECONDS', 120))
     logger.info("Background polling started. Interval: %ds", interval)
     while polling_active:
         try:
-            service = get_gmail_service()
-            if service:
-                count = poll_gmail(service)
-                last_poll_time = time.time()
-                last_poll_status = "OK - processed %d emails" % count
-                logger.info("Poll complete: %d emails processed", count)
-            else:
-                last_poll_status = "Gmail service not available (token.json missing?)"
-                logger.warning(last_poll_status)
+            count = process_lead_emails()
+            last_poll_time = time.time()
+            last_poll_status = "OK - processed %d emails" % count
+            logger.info("Poll complete: %d emails processed", count)
         except Exception as e:
             last_poll_status = "Error: %s" % str(e)
             logger.error("Polling error: %s", e, exc_info=True)
