@@ -23,6 +23,7 @@ services:
   - type: web
     name: adaba-lead-dedup
     runtime: python
+    pythonVersion: "3.11.9"
     rootDir: lead-dedup
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py
