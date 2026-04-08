@@ -1,139 +1,186 @@
 """
-app.py — Flask wrapper for the Adaba Lead Deduplication System.
-Runs the Gmail polling loop in a background thread.
-Flask provides a health-check endpoint so Render (Web Service) keeps it alive.
+Flask web service wrapper for Adaba Lead Dedup system.
+Runs Gmail polling in a background thread.
+Provides /health endpoint for Render health checks.
 """
 import os
 import threading
 import time
-from flask import Flask, jsonify
-from dotenv import load_dotenv
+import logging
+from flask import Flask, jsonify, request
+from database import init_db, get_connection
+from gmail_service import get_gmail_service, poll_gmail
+from telegram_service import send_report, build_report
 
-load_dotenv()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Track system status
-status = {
-    'running': False,
-    'emails_processed': 0,
-    'duplicates_deleted': 0,
-    'errors': 0,
-    'last_poll': None,
-    'start_time': None
-}
+polling_thread = None
+polling_active = False
+last_poll_time = None
+last_poll_status = "Not started yet"
 
-def run_lead_dedup_loop():
-    """Background thread: continuously polls Gmail and processes leads."""
-    from database import init_db, find_existing_order, insert_order, insert_duplicate, assign_csr
-    from gmail_service import get_gmail_service, get_unread_lead_emails, mark_as_read
-    from telegram_service import notify_csr, send_duplicate_alert, send_report, build_report
-    from datetime import datetime, timedelta
-    
-    poll_interval = int(os.environ.get('POLL_INTERVAL_SECONDS', '120'))
-    
-    print("[APP] Initializing database...")
-    init_db()
-    
-    print("[APP] Authenticating Gmail...")
-    try:
-        service = get_gmail_service()
-        print("[APP] Gmail authenticated successfully")
-    except Exception as e:
-        print(f"[APP] Gmail auth failed: {e}")
-        status['errors'] += 1
-        return
-    
-    status['running'] = True
-    status['start_time'] = datetime.utcnow().isoformat()
-    print(f"[APP] Lead dedup loop started. Polling every {poll_interval}s")
-    
-    last_morning_report = None
-    last_evening_report = None
-    
-    while True:
-        try:
-            emails = get_unread_lead_emails(service)
-            status['last_poll'] = datetime.utcnow().isoformat()
-            
-            for email in emails:
-                msg_id = email['msg_id']
-                customer_phone = email.get('customer_phone', '')
-                customer_email_addr = email.get('customer_email', '')
-                
-                existing = find_existing_order(customer_phone, customer_email_addr)
-                
-                if existing:
-                    original_time = existing[1]
-                    hours_diff = (datetime.utcnow() - original_time.replace(tzinfo=None)).total_seconds() / 3600
-                    insert_duplicate(msg_id, email['ad_buyer'], email['product'],
-                                   email['customer_name'], customer_phone, customer_email_addr, existing)
-                    send_duplicate_alert(email, original_time, hours_diff)
-                    status['duplicates_deleted'] += 1
-                    print(f"[DEDUP] Duplicate deleted: {customer_phone} ({hours_diff:.1f}h ago)")
+
+def background_poll():
+        """Background thread: poll Gmail every POLL_INTERVAL_SECONDS."""
+        global last_poll_time, last_poll_status, polling_active
+
+    interval = int(os.environ.get('POLL_INTERVAL_SECONDS', 120))
+    logger.info(f"Background polling started. Interval: {interval}s")
+
+    while polling_active:
+                try:
+                                service = get_gmail_service()
+                                if service:
+                                                    count = poll_gmail(service)
+                                                    last_poll_time = time.time()
+                                                    last_poll_status = f"OK - processed {count} emails"
+                                                    logger.info(f"Poll complete: {count} emails processed")
                 else:
-                    order_id = insert_order(msg_id, email['ad_buyer'], email['product'],
-                                           email['customer_name'], customer_phone, customer_email_addr,
-                                           email['raw_body'])
-                    csr = assign_csr(order_id)
-                    if csr:
-                        notify_csr(csr, email)
-                        print(f"[APP] Order #{order_id} -> CSR: {csr['name']}")
-                    status['emails_processed'] += 1
-                
-                mark_as_read(service, msg_id)
-            
-            # Check for scheduled reports
-            now = datetime.utcnow()
-            today_date = now.date().isoformat()
-            
-            if now.hour == 8 and now.minute < 3:
-                if last_morning_report != today_date:
-                    since = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(hours=12)
-                    from database import get_report_data
-                    data = get_report_data(since)
-                    report = build_report("Morning Report (8AM)", *data)
-                    send_report(report)
-                    last_morning_report = today_date
-                    print("[APP] Morning report sent")
-            
-            elif now.hour == 17 and now.minute < 3:
-                if last_evening_report != today_date:
-                    since = now.replace(hour=0, minute=0, second=0, microsecond=0)
-                    from database import get_report_data
-                    data = get_report_data(since)
-                    report = build_report("Evening Report (5PM)", *data)
-                    send_report(report)
-                    last_evening_report = today_date
-                    print("[APP] Evening report sent")
-        
-        except Exception as e:
-            print(f"[ERROR] Loop error: {e}")
-            status['errors'] += 1
-        
-        time.sleep(poll_interval)
+                                    last_poll_status = "Gmail service not available (token.json missing?)"
+                                    logger.warning(last_poll_status)
+except Exception as e:
+            last_poll_status = f"Error: {str(e)}"
+            logger.error(f"Polling error: {e}", exc_info=True)
 
-@app.route('/')
+        time.sleep(interval)
+
+
+def background_reports():
+        """Background thread: send reports at 8AM and 5PM UTC."""
+        import datetime
+        logger.info("Report scheduler started")
+
+    while True:
+                now = datetime.datetime.utcnow()
+                hour = now.hour
+                minute = now.minute
+
+        if (hour == 8 and minute == 0) or (hour == 17 and minute == 0):
+                        try:
+                                            report_data = build_report()
+                                            send_report(report_data)
+                                            logger.info(f"Report sent at {hour:02d}:{minute:02d} UTC")
+                                            time.sleep(61)  # Prevent double-sending within same minute
+except Exception as e:
+                logger.error(f"Report error: {e}", exc_info=True)
+                time.sleep(61)
+else:
+            time.sleep(30)  # Check every 30 seconds
+
+
+@app.route('/health', methods=['GET'])
 def health():
-    return jsonify({
-        'service': 'Adaba Lead Deduplication System',
-        'status': 'running' if status['running'] else 'starting',
-        'emails_processed': status['emails_processed'],
-        'duplicates_deleted': status['duplicates_deleted'],
-        'errors': status['errors'],
-        'last_poll': status['last_poll'],
-        'start_time': status['start_time']
-    })
+        """Health check endpoint for Render."""
+        return jsonify({
+            "ok": True,
+            "status": "healthy",
+            "polling_active": polling_active,
+            "last_poll_time": last_poll_time,
+            "last_poll_status": last_poll_status
+        })
 
-@app.route('/health')
-def health_check():
-    return jsonify({'ok': True, 'status': 'healthy'}), 200
+
+@app.route('/add-csr', methods=['POST'])
+def add_csr():
+        """Add a CSR to the database. POST JSON: {name, telegram_chat_id, secret}"""
+        data = request.get_json()
+        secret = os.environ.get('ADMIN_SECRET', 'adaba-admin-2026')
+        if data.get('secret') != secret:
+                    return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+        name = data.get('name')
+        chat_id = str(data.get('telegram_chat_id'))
+
+    if not name or not chat_id:
+                return jsonify({"ok": False, "error": "name and telegram_chat_id required"}), 400
+
+    try:
+                conn = get_connection()
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO lead_csrs (name, telegram_chat_id, is_active)
+                    VALUES (%s, %s, TRUE)
+                    ON CONFLICT (telegram_chat_id) DO UPDATE
+                    SET name = EXCLUDED.name, is_active = TRUE;
+                """, (name, chat_id))
+                conn.commit()
+                cur.close()
+                conn.close()
+                return jsonify({"ok": True, "message": f"CSR {name} added/updated"})
+except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route('/list-csrs', methods=['GET'])
+def list_csrs():
+        """List all CSRs."""
+        secret = request.args.get('secret', '')
+        admin_secret = os.environ.get('ADMIN_SECRET', 'adaba-admin-2026')
+        if secret != admin_secret:
+                    return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+        try:
+                    conn = get_connection()
+                    cur = conn.cursor()
+                    cur.execute("SELECT id, name, telegram_chat_id, total_assigned, is_active FROM lead_csrs ORDER BY id;")
+                    rows = cur.fetchall()
+                    cur.close()
+                    conn.close()
+                    csrs = [{"id": r[0], "name": r[1], "chat_id": r[2], "assigned": r[3], "active": r[4]} for r in rows]
+                    return jsonify({"ok": True, "csrs": csrs, "total": len(csrs)})
+except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route('/stats', methods=['GET'])
+def stats():
+        """Get system stats."""
+        secret = request.args.get('secret', '')
+        admin_secret = os.environ.get('ADMIN_SECRET', 'adaba-admin-2026')
+        if secret != admin_secret:
+                    return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+        try:
+                    conn = get_connection()
+                    cur = conn.cursor()
+                    cur.execute("SELECT COUNT(*) FROM lead_orders;")
+                    total_orders = cur.fetchone()[0]
+                    cur.execute("SELECT COUNT(*) FROM lead_deleted_duplicates;")
+                    total_dupes = cur.fetchone()[0]
+                    cur.execute("SELECT COUNT(*) FROM lead_csrs WHERE is_active = TRUE;")
+                    active_csrs = cur.fetchone()[0]
+                    cur.close()
+                    conn.close()
+                    return jsonify({
+                        "ok": True,
+                        "total_orders": total_orders,
+                        "total_duplicates_deleted": total_dupes,
+                        "active_csrs": active_csrs
+                    })
+except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 
 if __name__ == '__main__':
-    # Start the lead dedup loop in a background thread
-    thread = threading.Thread(target=run_lead_dedup_loop, daemon=True)
-    thread.start()
-    
-    port = int(os.environ.get('PORT', '8080'))
-    print(f"[APP] Starting Flask on port {port}")
+        # Initialize database tables
+        try:
+                    init_db()
+                    logger.info("Database initialized successfully")
+except Exception as e:
+        logger.error(f"Database init error: {e}")
+
+    # Start background polling thread
+    polling_active = True
+    polling_thread = threading.Thread(target=background_poll, daemon=True)
+    polling_thread.start()
+
+    # Start report scheduler thread
+    report_thread = threading.Thread(target=background_reports, daemon=True)
+    report_thread.start()
+
+    port = int(os.environ.get('PORT', 8080))
+    logger.info(f"Starting Flask on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
