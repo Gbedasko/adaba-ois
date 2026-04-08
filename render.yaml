@@ -20,12 +20,12 @@ services:
           name: adaba-ois-db
           property: connectionString
 
-  - type: worker
+  - type: web
     name: adaba-lead-dedup
     runtime: python
     rootDir: lead-dedup
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    startCommand: python app.py
     plan: free
     envVars:
       - key: DATABASE_URL
@@ -42,6 +42,8 @@ services:
         value: /etc/secrets/token.json
       - key: POLL_INTERVAL_SECONDS
         value: 120
+      - key: PORT
+        value: 8080
 
 databases:
   - name: adaba-ois-db
