@@ -23,7 +23,6 @@ services:
   - type: web
     name: adaba-lead-dedup
     runtime: python
-    pythonVersion: "3.11.9"
     rootDir: lead-dedup
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py
@@ -34,7 +33,7 @@ services:
           name: adaba-ois-db
           property: connectionString
       - key: TELEGRAM_BOT_TOKEN
-        value: 7077745263:AAFIoYbGV5z8KZBh9MeqSrawb2gY0UgEa3s
+        value: 8393849878:AAH-tw2ReLEgWjWSKkJ42BwG16hUD2Hsk4o
       - key: TELEGRAM_REPORT_CHANNEL_ID
         value: YOUR_REPORT_CHANNEL_ID
       - key: GMAIL_CREDENTIALS_PATH
@@ -45,6 +44,8 @@ services:
         value: 120
       - key: PORT
         value: 8080
+      - key: PYTHON_VERSION
+        value: 3.11.9
 
 databases:
   - name: adaba-ois-db
